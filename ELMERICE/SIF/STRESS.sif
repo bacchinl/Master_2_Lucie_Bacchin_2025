@@ -1,0 +1,221 @@
+!---LUA BEGIN
+!assert(loadfile('./FUNCTION/geometry.lua'))()
+!---LUA END 
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! PARAMETERS
+!! Name of the RUN 
+$name="<NAME>"
+!! Regularisation parameter
+$Lambda=<Lambda>
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+$OBSERVATION_FILE="<OBS_FILE>"
+$year="<YEAR>"
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! number of iterations
+$niter=1 ! generally 4000
+!$niter = 200
+!
+! Exps. definitions.
+$yearinsec = 31536000.0
+$rhoi = 900.0/(1.0e6*yearinsec^2)   
+$rhow = 1028.0/(1.0e6*yearinsec^2)
+$gravity = -9.81*yearinsec^2
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Header
+  Mesh DB "./Simu_$year$" "Mesh_$year$_Lucille"
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Constants
+  Water Density = Real $ rhow
+  Ice Density = Real $ rhoi
+  Sea Level = Real 0.0
+  Gravitation = Real $ gravity
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+  Coordinate System  = Cartesian 
+  Simulation Type = Steady State
+
+  Steady State Min Iterations = 1
+  Steady State Max Iterations = $niter
+
+  
+  Post File = "STRESS_$name$_L.vtu"
+  Output Intervals = 30
+
+  Restart File = "OPTIM_$name$-1_L.result"
+  Restart Before Initial Conditions = logical True
+
+  max output level = 3
+
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Body 1
+  Equation = 1
+  Body Force = 1
+  Material = 1
+  Initial Condition = 1
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Initial Condition 1
+! mu is the optimised viscosity variable
+ !alpha =  Variable alpha
+  !  REAL
+ zs = Variable zs,zb
+ Real LUA "hmin(tx[0], tx[1])"
+ !Thickness = Variable h
+ 
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Body Force 1
+  Flow BodyForce 1 = Real 0.0            
+  Flow BodyForce 2 = Real 0.0              
+  Flow BodyForce 3 = Real $gravity
+
+  SSAVelocity 1 = Equals SSAVelocity 1
+  SSAVelocity 2 = Equals SSAVelocity 2
+  ssavelocity = Equals SSAVelocity  
+  SSAVelocity 1 Condition = Variable GroundedMask
+    Real procedure "USFs_PIG" "GM_CONDITION"
+  SSAVelocity 2 Condition = Variable GroundedMask
+    Real procedure "USFs_PIG" "GM_CONDITION"
+  Thickness = Equals h
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Material 1
+  Viscosity Exponent = Real $1.0e00/3.0e00
+ 
+  Critical Shear Rate = Real 1.0e-10
+
+  SSA Mean Density = Real $rhoi
+
+  SSA Mean Viscosity = Variable alpha
+      REAL procedure "ElmerIceUSF" "Asquare"
+
+  Viscosity = Variable alpha
+      REAL procedure "ElmerIceUSF" "Asquare"
+
+  SSA Friction Law = String "linear"
+  SSA Friction Parameter = Real 0.0
+  
+  Cauchy = Logical True ! for computedevstress
+  
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+Solver 1
+  Equation = "SSA"
+  Variable = -dofs 2 "SSAVelocity"
+
+  Procedure = "ElmerIceSolvers" "AdjointSSA_SSASolver"
+
+  Linear System Solver = Direct
+  Linear System Direct Method = mumps
+  mumps percentage increase working space= Integer 100
+
+  !Linear system solver = Iterative
+  !Linear system max iterations = 3000
+  !Linear system iterative method = BicGStab
+  !Linear system preconditioning = ILU0
+  !Linear system convergence tolerance = real 1.0e-9
+
+  Nonlinear System Max Iterations = 50
+  Nonlinear System Convergence Tolerance  = 1.0e-6
+  Nonlinear System Newton After Iterations = 8
+  Nonlinear System Newton After Tolerance = 1.0e-05
+  Nonlinear System Relaxation Factor = 1.00
+
+  Steady State Convergence Tolerance = Real 1.0e-12
+
+  !Exported Variable 1 = -global CostValue
+  !Exported Variable 1 = -DOFs 1 alpha
+  !Exported Variable 3 = -nooutput DJDEta
+  !Exported Variable 4 = -nooutput "Velocityb"
+  !Exported Variable 4 DOFs = 2
+  Exported Variable 5 = String "ssavelocity"
+  Exported Variable 5 DOFs = 2
+  Exported Variable 6 = -DOFs 1 "h"
+  Exported Variable 7 = -DOFs 4 Stress
+  !Exported Variable 7 DOFs = 4
+
+
+End
+
+
+Solver 2
+  !Exec Solver = Before Saving
+  Equation = String "StressSolver"
+  Procedure =  File "./SIF/MyComputeDevStress" "ComputeDevStress"
+  ! this is just a dummy, hence no output is needed
+  !-----------------------------	------------------------------------------
+  Variable = -nooutput "Sij"
+  Variable DOFs = 1
+  ! the name of the variable containing the flow solution (U,V,W,Pressure)
+  !-----------------------------------------------------------------------
+  Flow Solver Name = String "ssavelocity" ! Flow solution without SSA is working 
+  ! no default value anymore for "Stress Variable Name"
+  Thickness Variable Name = String "Thickness"
+  Stress Variable Name = String "Stress"
+  !Viscosity Variable Name = String "Viscosity"
+  !-----------------------------------------------------------------------
+  Exported Variable 1 = String "Stress" ! [Sxx, Syy, Szz, Sxy] in 2D
+                                 ! [Sxx, Syy, Szz, Sxy, Syz, Szx] in 3D
+  Exported Variable 1 DOFs = 4  ! 4 in 2D, 6 in 3D
+  Exported Variable 2 = -DOFs 1 Viscosity
+ 
+  Linear System Solver = "Iterative"
+  Linear System Iterative Method = "BiCGStab"
+  Linear System Max Iterations = 300
+  Linear System Convergence Tolerance = 1.0E-09
+  Linear System Abort Not Converged = True
+  Linear System Preconditioning = "ILU0"
+  Linear System Residual Output = 1
+End
+
+
+
+Solver 3
+  !Exec Solver = Never
+  Equation = "EigenSR"
+  Variable = -nooutput "EigenVector"
+  Variable DOFs = 3
+
+  Procedure = "ElmerIceSolvers" "ComputeEigenValues"
+
+! 3 Eigenvalues    
+  Exported Variable 1 = "EigenSR"
+  EigenValue Variable Name = String "EigenSR"
+  Tensor Variable Name = String "Stress"
+  Exported Variable 1 DOFS = 3
+
+! Principal vectors (optional) 
+  Exported Variable 2 = EigenVector1
+  Exported Variable 2 DOFS = 3
+  Exported Variable 3 = EigenVector2
+  Exported Variable 3 DOFS =  3
+  Exported Variable 4 = EigenVector3
+  Exported Variable 4 DOFS = 3
+End
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Equation 1
+  Active Solvers(3) = 1 2 3 
+End
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+Boundary Condition 1
+  Name = "Ice Front"
+  Target Boundaries(2) = 2 4
+
+  calving front = logical true
+End
+

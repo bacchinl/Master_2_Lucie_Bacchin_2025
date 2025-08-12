@@ -1,0 +1,170 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+$DATA_DIR="../../../../DATA/BEDROCK/"
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!include /scratch/cnt0021/gge6066/jbrondex/InitMIP_AMUNDSEN_Occigen/AMUNDSEN/PARAMETERS/Physical_Params.IN
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+$yearinsec= 31536000.0
+$rhoi =900.0/(1.0e6*yearinsec^2)
+$rhow =1028.0/(1.0e6*yearinsec^2)
+$gravity = -9.81*yearinsec^2
+$zsl = 0
+$year = "<YEAR>"
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Header
+Mesh DB "./Simu_$year$" "Mesh_$year$_Lucille"
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Constants
+  sea level = Real $zsl 
+  water density = Real $rhow
+  HMin Critical Thickness = Real 1.0
+End
+
+Initial Condition 1
+  mu = Real 0.116
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Simulation
+  Coordinate System  = Cartesian 2D 
+  Simulation Type = Steady State
+
+  Output Intervals = 1
+  Steady State Max Iterations = 1
+  Steady State Min Iterations = 1
+
+  Output File = "TOPOGRAPHY2.result"
+  Post File = "TOPOGRAPHY2.vtu"
+
+  max output level = 10
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Body 1
+  Equation = 1	
+  Material = 1
+  Body Force = 1
+  Initial Condition = 1
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Body Force 1
+! h = Variable h
+!   real procedure "USFs_PIG" "GM_CONDITION"
+End
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+Material 1
+SSA Mean Density = Real $rhoi
+  GroundedAreaCoeff = Variable Groundedmask
+        Real procedure "USFs_PIG" "GM_CONDITION"
+End
+
+!%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Solver 1
+
+  Equation = "ScatteredInter"
+  Variable = -nooutput "dumy"
+
+  procedure = "Scattered2DDataInterpolator" "Scattered2DDataInterpolator"
+
+  Bounding Box dx = Real 80000.0
+
+  CheckNaN = Logical True
+  Replace NaN by = Real 0
+
+!!!!! NNI or linear (nn-c library)
+   Variable 1 = File "bed"
+   Target Variable 1 = String "bedrock"
+   Variable 1 data file = File "$DATA_DIR$/../ELEVATION/Bedmachine_elevation_Lucille_$year$.nc"
+   Variable 1 method = String "li"
+
+   Variable 2 = File "thickness"
+   Target Variable 2 = String "h"
+   Variable 2 data file = File "$DATA_DIR$/../ELEVATION/Bedmachine_elevation_Lucille_$year$.nc"
+   Variable 2 method = String "li"
+
+   Variable 3 = File "surface"
+   Target Variable 3 = String "surface"
+   Variable 3 data file = File "$DATA_DIR$/../ELEVATION/Bedmachine_elevation_Lucille_$year$.nc"
+   Variable 3 method = String "li"
+
+   Variable 4 = File "vx"
+   Target Variable 4 = String "uobs 1"
+   Variable 4 data file = File "$DATA_DIR$/../VELOCITY/ASE_TimeSeries_$year$-new.nc"
+   Variable 4 method = String "li"
+   
+   Variable 5 = File "vy"
+   Target Variable 5 = String "uobs 2"
+   Variable 5 data file = File "$DATA_DIR$/../VELOCITY/ASE_TimeSeries_$year$-new.nc"
+   Variable 5 method = String "li"
+
+   Variable 6 = File "v"
+   Target Variable 6 = String "uobs"
+   Variable 6 data file = File "$DATA_DIR$/../VELOCITY/ASE_TimeSeries_$year$-new.nc"
+   Variable 6 method = String "li"
+
+   Variable 7 = File "Mumean"
+   Target Variable 7 = String "mu"
+   Variable 7 data file = File "$DATA_DIR$/../VISCOSITY/Antarctic_MeanViscosity_Paterson10.nc"
+   Variable 7 method = String "li"
+
+
+  Exported Variable 1 = bedrock
+  Exported Variable 2 = thickness
+  Exported Variable 3 = surface
+  Exported Variable 4 = uobs 1
+  Exported Variable 5 = uobs 2
+  Exported Variable 6 = uobs
+  Exported Variable 7 = mu
+
+End  
+
+Solver 2
+  Equation = "UpD"
+  Variable = -nooutput "dumy"
+    Procedure = "ElmerIceSolvers" "UpdateExport"
+  
+  Exported Variable 1 = h
+  Exported Variable 2 = zs
+  Exported Variable 3 = zb
+  Exported Variable 4 = mu
+End
+
+Solver 3
+  !Exec Solver = Never
+  Equation = "Flotation"
+  Variable = GroundedMask
+  Procedure = "Flotation" "Flotation"
+
+ Exported Variable 1 = -dofs 1 "zs"
+ Exported Variable 2 = -dofs 1 "zb"
+ Exported Variable 3 = -dofs 1 "bedrock"
+
+End
+ 
+Solver 4
+     !Exec Solver = Never
+     Equation = "Save Scalars"
+     Procedure = File "SaveData" "SaveScalars"
+
+     Filename = File "Scalars_TOPOGRAPHY2.dat"
+
+     Parallel Reduce = logical true
+
+! int H = thickness
+     Variable 1 = "thickness"
+     Operator 1 = "int"
+! area
+     Variable 2 = "bedrock"
+     Operator 2 = "int"
+! area grounded
+     Variable 3 = "groundedmask"
+     Operator 3 = "volume"
+     Coefficient 3 = "GroundedAreaCoeff"
+End
+
+
+
+!#####
+Equation 1
+  Active Solvers (4)= 1 2 3 4 
+End
+
