@@ -1,4 +1,3 @@
-
 """ This code works with the plot_buttressing functions """
 
 
@@ -12,6 +11,8 @@ from plot_buttressing import (
     plot_buttressing,
     plot_corrected,
     plot_stress,
+    plot_stress_simple,
+    plot_eigenvec,
     get_furst_colormap,
     test_var
 )
@@ -23,6 +24,9 @@ year_to_sec = 3.15576e+7
 # print ressource 
 import resource
 print("Max memory:", resource.getrlimit(resource.RLIMIT_AS))
+
+
+calcul_eig_furst_way = False
 
 beta = '1e-06'
 ## ------------------------------------------------- IMPORT DATA  ------------------------------------------
@@ -43,9 +47,9 @@ def compute_buttressing_unstructured(filename, nn=3, rhoice=917, rhow=1028, grav
     mesh = pv.read(filename)
 
     # noms plausibles — à ajuster selon le VTU
-    vx = mesh.point_data["uobs 1"]     # vx m/a
-    vy = mesh.point_data["uobs 2"]     # vy m/a
-    eta = mesh.point_data["alpha"]**2 # viscosité optim, stockée en racine ds pvtu
+    vx = mesh.point_data["uobs 1"]    # vx m/a
+    vy = mesh.point_data["uobs 2"]    # vy m/a
+    eta = mesh.point_data["alpha"]**2  # viscosité optim, stockée en racine ds pvtu
     thi = mesh.point_data["h"]         # thicknessi m
  
     pts = mesh.points
@@ -81,13 +85,17 @@ def compute_buttressing_unstructured(filename, nn=3, rhoice=917, rhow=1028, grav
     # ---------------------------------------------------------
     # 3) DEVIATORIC STRESS (glen law)
     # ---------------------------------------------------------
+
     rf = eta  # viscosité, stockée en racine dans pvtu
-    factor = rf**(-1/nn) * eff**((1-nn)/(2*nn))
+    #factor = rf**(-1/nn) * eff**((1-nn)/(2*nn))
+    #factor = rf * eff**((1-nn)/(2*nn))
 
-    ttxx = exx * factor
-    ttyy = eyy * factor
-    ttxy = exy * factor
-
+    #ttxx = exx * factor
+    #ttyy = eyy * factor
+    #ttxy = exy * factor
+    ttxx = 2 * eta * exx
+    ttyy = 2 * eta * eyy
+    ttxy = 2 * eta * exy
     # ---------------------------------------------------------
     # 4) TENSEUR T MODIFIÉ (stress tensor in SSA) 
     # ---------------------------------------------------------
@@ -99,13 +107,30 @@ def compute_buttressing_unstructured(filename, nn=3, rhoice=917, rhow=1028, grav
     # ---------------------------------------------------------
     # 5) EIGENVALUES
     # ---------------------------------------------------------
+    
     bb = -(t11 + t22)
     cc = t11*t22 - t21*t12
 
     disc = np.sqrt(bb**2 - 4*cc)
 
-    eig1 = (-bb + disc) / 2
-    eig2 = (-bb - disc) / 2
+    eig1 = (-bb + disc) / 2 #* 1e6 to Pa ?
+    eig2 = (-bb - disc) / 2 #* 1e6
+
+    
+    # ---------------------------------------------------------
+    # 5bis) EIGENVECTOR associated with eig2
+    # ---------------------------------------------------------
+    eig2_vx = t12
+    eig2_vy = eig2 - t11
+
+    # normalisation
+    norm = np.sqrt(eig2_vx**2 + eig2_vy**2) + 1e-12
+    #norm = np.sqrt(1**2 + eig2_vy**2) + 1e-12
+    eig2_vx /= norm
+    eig2_vy /= norm
+
+    if calcul_eig_furst_way :
+        eig2 = np.sqrt(eig2_vx**2 + eig2_vy**2)
 
     # ---------------------------------------------------------
     # 6) DIRECTIONS / PROJECTIONS (KN1)
@@ -123,19 +148,19 @@ def compute_buttressing_unstructured(filename, nn=3, rhoice=917, rhow=1028, grav
     # ---------------------------------------------------------
     # 7) BUTTRESSING RATIOS
     # ---------------------------------------------------------
-    tau0 = 0.5*rhoice*grav*thiampl*thi*(1 - rhoice/rhow)
+    tau0 = 0.5*rhoice*grav*thi*(1 - rhoice/rhow) 
 
     KT  = psi / tau0
     KN1 = 1 - tau  / tau0
     KN2 = 1 - eig1 / tau0
-    KN3 = 1 - eig2 / tau0
+    KN3 = 1 - (eig2 / tau0) *10e6
 
-    return x, y, vx, vy, t11, t12, t21, t22, KT, KN1, KN2, KN3
-
-
+    return x, y, vx, vy, t11, t12, t21, t22, KT, KN1, KN2, KN3, eig1, eig2, eig2_vx, eig2_vy
 
 
-x, y, vx, vy, t11, t12, t21, t22, KT, KN1, KN2, KN3 = compute_buttressing_unstructured(filename)
+
+
+x, y, vx, vy, t11, t12, t21, t22, KT, KN1, KN2, KN3, eig1, eig2, eig2_vx, eig2_vy = compute_buttressing_unstructured(filename)
 
 ## tests 
 def test_var(var, name):
@@ -176,7 +201,7 @@ fig, ax = plot_corrected(
     KN3,
     vx,vy,
     cmap,        # ta palette blue–brown ou custom
-    title="KNflow – Corrected Version - Friction at {beta}"
+    title="KN3 – Corrected Version - Friction at {beta}"
 )
 plt.savefig(f"../BUTTRESSING/buttressing_corrected_{year}_FRT_{beta}", dpi = 300)
 plt.show()
@@ -188,3 +213,18 @@ fig, ax = plot_stress(
 #plt.title(f"Stress for year {year}, friction param of {beta}")
 plt.savefig(f"../STRESS/stress_{year}_FRT_{beta}", dpi = 300)
 plt.show()
+
+
+fig, ax = plot_stress_simple(
+    x, y,t11, t12, t21, t22, year, beta
+)
+plt.savefig(f"../STRESS/stress_simple_{year}_FRT_{beta}", dpi = 300)
+plt.show()
+
+fig, ax = plot_eigenvec(
+    x, y, eig2_vx, eig2_vy, year, beta
+)
+plt.savefig(f"../STRESS/eigenvec_{year}_FRT_{beta}", dpi = 300)
+plt.show()
+
+
